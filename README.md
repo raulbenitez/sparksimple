@@ -1,5 +1,5 @@
 # sparksimple
-spark detection in cardiac cells 
+spark detection in cardiac cells (MATLAB)
 
 Autors: 
 
