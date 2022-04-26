@@ -1,0 +1,127 @@
+function [] = SparkSimple2()
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%% SparkSimple2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% General settings
+N=1;            % Number of experiments to process (set N=0 to analyze all sub-folders in folder)
+tagSpk='ch00';  % Relevant channel identifier
+RF='ResultsNew';   % Name for results folder
+
+% Detection settings
+roiR=2;         % ROI radius around spark candidate center (in um)
+fs=0;           % Gaussian filter size (in um) for spatial smoothing in images (photon counting issues)
+ft=1;           % Temporal filtering (in frames)
+dm=1;           % Distance in microns for merging
+tm=30;          % Time in miliseconds for merging
+nc=68;          % Number of candidates
+
+% Filtering parameters
+iT=0.3;          % Spark relative intensity threshold (maximum value)
+Bl=1;            % Spark previous baseline (maximum value)
+Fd=[5 200];      % Full duration at half maximum in ms (valid interval)
+ta=[20 200];     % Spark decay constant tau in ms (valid interval)
+t2=[0 200];      % Time to peak for spark uprise in ms (valid interval)
+r2=-1;           % Spark R² on decay fit (minimum value)
+
+% Aditional settings
+fb=0;            % Force baseline (if N>1 first folder will force baseline value)
+bf=1;            % Brightness factor for output frames
+sr=1;            % Show rejected sparks in film
+sp=1;            % Starting pont (1-detection,2-features,3-filter,4-rois,5-export)
+expNam={'CON','DRUG1','DRUG2','DRUG3','DRUG4','DRUG5','DRUG6'};% exp names for plots
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+warning('off','all')
+%load('ultimpaquet.mat');
+addpath('./mfiles');
+if(fb==0),fb=-1;end% per poder reciclar variables
+ys=1.5;% Y-scale max val
+save('RF.mat','RF');gg=ys;
+save('ys.mat','ys');
+prefix='yData';save('prefix.mat','prefix');
+if(N>0)
+    folder=' ';try load('ultimpaquet.mat');folder=rutes{1};end
+    for ii=1:N
+        try folder=uigetdir(folder);catch folder=uigetdir(' ');end
+        rutes{ii}=folder;folder=folder(1:find(folder=='\',1,'last')-1);
+        if(N>1)
+            if(ii==1),disp('Adding to processing pipeline:');end
+        disp([' ' num2str(ii) '-. ' rutes{ii}]);
+        end
+    end
+else
+    folder=' ';try load('ultimpaquet.mat');folder=rutes{1};end
+    try folder=uigetdir(folder);catch folder=uigetdir(' ');end
+    s=dir(folder);
+    cc=0;
+    for ii=3:length(s)
+        if(s(ii).isdir)
+            cc=cc+1;
+            rutes{cc}=[folder '/' s(ii).name];
+        end
+    end
+    N=length(rutes);
+end
+save('ultimPaquet','rutes');
+
+try gg=urlread('http://leica.upc.es/counters/ss.php'); end
+firstfolder=rutes{1};
+for ii=1:N
+    ensenya(['Starting with folder ' rutes{ii}]);
+    try
+        folder=rutes{ii};
+        S=[dir([folder '/*' tagSpk '*.jpg']) dir([folder '/*' tagSpk '*.tif'])];
+        if isempty(S)
+            S=dir([folder '/*' tagSpk '*.data']);
+        end
+        DAT=[];
+        if(isempty(S)),error('No images found!');end
+        aux=imread([folder '/' S(1).name]);
+        disp(['         Physical size: ' niceNums(size(aux,1),0) ' x ' niceNums(size(aux,2),0) ' x ' niceNums(length(S),0) '.']);        
+        if(sp==1)
+             try rmdir([folder '/' RF],'s'); end
+        end
+             Rfol=[folder '/' RF];
+            if(exist(Rfol,'dir')~=7),mkdir(Rfol);end
+            if(exist([Rfol '/detFilm'],'dir')~=7),mkdir([Rfol '/detFilm']);end
+            if(exist([Rfol '/extraFigs'],'dir')~=7),mkdir([Rfol '/extraFigs']);end
+            if(sp<4),delete([Rfol '/extraFigs/*.*']);end
+            %------------% 1 detection
+            if(sp==1)   
+               if((ii==1)),fba=-1;else fba=fb;end% 
+               fo = sparkDetect(folder,Rfol,S,dm,tm,roiR,fs,nc,ft,fba);
+               if((ii==1)&&(fb~=-1)),fb=fo;end% reciclem el flag de force baseline i assignem el valor a arrossegar
+            else
+                load([Rfol '/zMetaData.mat']);
+            end
+            %------------% 2 features
+            if(sp<=2)
+            sparkFeatures(folder,Rfol,roiR);
+            end
+            %------------% 3 filter
+            if(sp<=3)
+            sparkFiltSimple(folder,Rfol,iT,ta,t2,r2,Bl,Fd);            
+            end
+            %------------% 4 rois
+            if(sp<=4)
+            clusterROIs(folder,Rfol,S,sr,bf);    
+            end
+            load([Rfol '/zData2.mat']);if(exist('spkF','var')==0),spkF=SPARKS;end            
+            %------------% 5 export
+            if(sp<=5)&&(isempty(spkF)==0)
+                [dades] = guardaDades(spkF,ROIs,folder,Rfol);
+            end
+            DAT=[DAT;dades];
+            ensenya('Folder finished');
+            
+%         end
+        DAD{ii}=DAT;
+    catch er;disp(['Skipping due to error: ' er.message ' In ' er.stack(1).name '.m (line ' num2str(er.stack(1).line) ')']);end
+    disp(' ');
+end
+if(ii>1)
+comparaExps(DAD,[firstfolder,'\',RF],expNam);
+end
+end
